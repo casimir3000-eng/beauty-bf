@@ -1,0 +1,6 @@
+{
+  "name": "BEAUTY BF",
+  "description": "Marketplace de réservation de services de beauté au Burkina Faso (salons, coiffure, esthétique, domicile).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
