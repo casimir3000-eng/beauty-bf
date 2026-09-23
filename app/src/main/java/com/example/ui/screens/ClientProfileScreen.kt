@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.BeautyViewModel
 import com.example.ui.components.DemoDataNotice
+import com.example.ui.components.SecurityPrivacyDialog
 import com.example.ui.theme.AmberGoldSecondary
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.TerracottaPrimary
@@ -72,6 +77,7 @@ fun ClientProfileScreen(
     val favoriteIds by viewModel.favoriteIds.collectAsState()
 
     val clientAppointmentsCount = allAppointments.count { it.clientUserId == currentUser.id || it.clientPhone == currentUser.phone }
+    var showSecurityDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -290,6 +296,14 @@ fun ClientProfileScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     ProfileOptionItem(
+                        icon = Icons.Default.Security,
+                        title = "Sécurité & Protection des données",
+                        subtitle = "Chiffrement AES-256, consentements CIL & droit à l'oubli",
+                        onClick = { showSecurityDialog = true }
+                    )
+                    HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+
+                    ProfileOptionItem(
                         icon = Icons.Default.Person,
                         title = "Informations personnelles",
                         subtitle = "Prénom, nom et numéro de contact",
@@ -366,6 +380,13 @@ fun ClientProfileScreen(
             }
         }
     }
+
+    if (showSecurityDialog) {
+        SecurityPrivacyDialog(
+            viewModel = viewModel,
+            onDismiss = { showSecurityDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -378,6 +399,7 @@ private fun ProfileOptionItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onClick() }
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

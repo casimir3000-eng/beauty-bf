@@ -147,3 +147,42 @@ interface PlatformSettingsDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun updateSettings(settings: PlatformSettingsEntity)
 }
+
+@Dao
+interface SecurityAuditDao {
+    @Query("SELECT * FROM security_audit_logs ORDER BY timestamp DESC")
+    fun getAllAuditLogs(): Flow<List<SecurityAuditEntity>>
+
+    @Query("SELECT * FROM security_audit_logs ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentLogs(limit: Int = 20): Flow<List<SecurityAuditEntity>>
+
+    @Query("SELECT * FROM security_audit_logs WHERE userId = :userId ORDER BY timestamp DESC")
+    fun getLogsForUser(userId: String): Flow<List<SecurityAuditEntity>>
+
+    @Query("SELECT * FROM security_audit_logs ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLastLog(): SecurityAuditEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAuditLog(log: SecurityAuditEntity)
+
+    @Query("SELECT COUNT(*) FROM security_audit_logs")
+    suspend fun countLogs(): Int
+}
+
+@Dao
+interface UserConsentDao {
+    @Query("SELECT * FROM user_consents ORDER BY consentKey ASC")
+    fun getAllConsents(): Flow<List<UserConsentEntity>>
+
+    @Query("SELECT * FROM user_consents WHERE consentKey = :key")
+    fun getConsentByKey(key: String): Flow<UserConsentEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertConsent(consent: UserConsentEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertConsents(consents: List<UserConsentEntity>)
+
+    @Query("UPDATE user_consents SET isGranted = :isGranted, updatedAt = :updatedAt WHERE consentKey = :key")
+    suspend fun updateConsentStatus(key: String, isGranted: Boolean, updatedAt: Long)
+}

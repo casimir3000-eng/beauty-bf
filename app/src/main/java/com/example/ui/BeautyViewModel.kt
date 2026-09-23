@@ -15,6 +15,7 @@ import com.example.data.model.Review
 import com.example.data.model.User
 import com.example.data.model.UserRole
 import com.example.data.repository.BeautyRepository
+import com.example.security.SecurityService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -65,15 +66,25 @@ data class FilterState(
 class BeautyViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: BeautyRepository
+    val securityService: SecurityService
 
     init {
         val db = BeautyBfDatabase.getDatabase(application, viewModelScope)
         repository = BeautyRepository(db)
+        securityService = SecurityService(db)
     }
 
     // Portal & Auth State
     val authPortalState = MutableStateFlow(AuthPortalState.GATEWAY_CHOICE)
     val authErrorMessage = MutableStateFlow<String?>(null)
+
+    // Security & Data Protection States
+    val securityAuditLogs = securityService.getRecentAuditLogs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val userConsents = securityService.getUserConsents()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val exportedDataJson = MutableStateFlow<String?>(null)
+    val dataExportSuccessMessage = MutableStateFlow<String?>(null)
 
     // Role state
     private val _currentRole = MutableStateFlow(UserRole.CLIENT)
@@ -233,9 +244,33 @@ class BeautyViewModel(application: Application) : AndroidViewModel(application) 
             authErrorMessage.value = "Veuillez renseigner votre numéro de téléphone"
             return false
         }
+        val rateLimit = securityService.checkRateLimit(phone.trim())
+        if (!rateLimit.first) {
+            authErrorMessage.value = "Trop de tentatives échouées. Veuillez patienter ${rateLimit.second}s par mesure de sécurité."
+            viewModelScope.launch {
+                securityService.recordAudit(
+                    action = "LOGIN_RATE_LIMITED",
+                    userId = phone.trim(),
+                    userRole = "CLIENT",
+                    details = "Blocage temporaire anti-brute force déclenché."
+                )
+            }
+            return false
+        }
+
         _currentRole.value = UserRole.CLIENT
         authPortalState.value = AuthPortalState.AUTHENTICATED
         authErrorMessage.value = null
+        securityService.resetRateLimit(phone.trim())
+
+        viewModelScope.launch {
+            securityService.recordAudit(
+                action = "LOGIN_SUCCESS",
+                userId = currentUser.value.id,
+                userRole = "CLIENT",
+                details = "Connexion sécurisée client (${currentUser.value.firstName} ${currentUser.value.lastName})."
+            )
+        }
         return true
     }
 
@@ -251,12 +286,16 @@ class BeautyViewModel(application: Application) : AndroidViewModel(application) 
             authErrorMessage.value = "Veuillez renseigner votre prénom et numéro de téléphone"
             return false
         }
+        val sanitizedFirst = securityService.sanitizeInput(firstName)
+        val sanitizedLast = securityService.sanitizeInput(lastName)
+        val sanitizedPhone = securityService.sanitizeInput(phone)
+
         currentUser.value = User(
             id = "client-${UUID.randomUUID().toString().take(8)}",
             role = UserRole.CLIENT,
-            firstName = firstName.trim(),
-            lastName = lastName.trim(),
-            phone = phone.trim(),
+            firstName = sanitizedFirst,
+            lastName = sanitizedLast,
+            phone = sanitizedPhone,
             email = null,
             city = city,
             sector = sector
@@ -264,10 +303,33 @@ class BeautyViewModel(application: Application) : AndroidViewModel(application) 
         _currentRole.value = UserRole.CLIENT
         authPortalState.value = AuthPortalState.AUTHENTICATED
         authErrorMessage.value = null
+
+        viewModelScope.launch {
+            securityService.recordAudit(
+                action = "REGISTER_CLIENT_SUCCESS",
+                userId = currentUser.value.id,
+                userRole = "CLIENT",
+                details = "Inscription nouveau compte client avec consentement CIL initialisé."
+            )
+        }
         return true
     }
 
     fun loginProvider(providerIdOrPhone: String, pass: String): Boolean {
+        val rateLimit = securityService.checkRateLimit(providerIdOrPhone.trim())
+        if (!rateLimit.first) {
+            authErrorMessage.value = "Trop de tentatives échouées. Veuillez patienter ${rateLimit.second}s par mesure de sécurité."
+            viewModelScope.launch {
+                securityService.recordAudit(
+                    action = "LOGIN_PROVIDER_RATE_LIMITED",
+                    userId = providerIdOrPhone.trim(),
+                    userRole = "PROVIDER",
+                    details = "Blocage temporaire anti-brute force prestataire."
+                )
+            }
+            return false
+        }
+
         val prov = allProviders.value.firstOrNull {
             it.id.equals(providerIdOrPhone.trim(), ignoreCase = true) ||
             it.phone.contains(providerIdOrPhone.trim())
@@ -279,7 +341,60 @@ class BeautyViewModel(application: Application) : AndroidViewModel(application) 
         _currentRole.value = UserRole.PROVIDER
         authPortalState.value = AuthPortalState.AUTHENTICATED
         authErrorMessage.value = null
+        securityService.resetRateLimit(providerIdOrPhone.trim())
+
+        viewModelScope.launch {
+            securityService.recordAudit(
+                action = "LOGIN_PROVIDER_SUCCESS",
+                userId = currentProviderId.value,
+                userRole = "PROVIDER",
+                details = "Connexion sécurisée prestataire (${prov?.salonName ?: currentProviderId.value})."
+            )
+        }
         return true
+    }
+
+    // Personal Data Protection & Privacy Rights (Loi 001-2021/AN Burkina Faso)
+    fun toggleConsent(key: String, isGranted: Boolean) {
+        viewModelScope.launch {
+            securityService.updateConsent(key, isGranted)
+        }
+    }
+
+    fun exportPersonalData() {
+        viewModelScope.launch {
+            val exportJson = securityService.generatePersonalDataExportJson(
+                user = currentUser.value,
+                appointments = allAppointments.value,
+                reviews = emptyList()
+            )
+            exportedDataJson.value = exportJson
+            dataExportSuccessMessage.value = "Données personnelles générées et signées cryptographiquement."
+            securityService.recordAudit(
+                action = "DATA_PORTABILITY_EXPORT",
+                userId = currentUser.value.id,
+                userRole = currentRole.value.name,
+                details = "Génération de l'archive de portabilité des données personnelles."
+            )
+        }
+    }
+
+    fun requestRightToErasure(onComplete: () -> Unit) {
+        viewModelScope.launch {
+            securityService.executeRightToErasure(currentUser.value.id)
+            currentUser.value = User(
+                id = "anonymized-" + UUID.randomUUID().toString().take(6),
+                role = UserRole.CLIENT,
+                firstName = "Client",
+                lastName = "Anonymisé",
+                phone = "•• •• •• ••",
+                email = null,
+                city = "Ouagadougou",
+                sector = "Inconnu"
+            )
+            authPortalState.value = AuthPortalState.GATEWAY_CHOICE
+            onComplete()
+        }
     }
 
     fun registerProvider(
@@ -469,6 +584,12 @@ class BeautyViewModel(application: Application) : AndroidViewModel(application) 
             if (success) {
                 bookingSuccessMessage.value = "Demande de rendez-vous envoyée au prestataire !"
                 bookingErrorMessage.value = null
+                securityService.recordAudit(
+                    action = "APPOINTMENT_CREATED",
+                    userId = currentUser.value.id,
+                    userRole = "CLIENT",
+                    details = "Réservation #${appointment.id} créée auprès de ${provider.salonName} pour ${service.name} (${formatFcfa(draft.totalFcfa)})."
+                )
                 onSuccess()
             } else {
                 bookingErrorMessage.value = "Ce créneau vient d'être réservé par un autre client."
@@ -480,24 +601,48 @@ class BeautyViewModel(application: Application) : AndroidViewModel(application) 
     fun acceptAppointment(appointmentId: String) {
         viewModelScope.launch {
             repository.updateAppointmentStatus(appointmentId, AppointmentStatus.CONFIRMED)
+            securityService.recordAudit(
+                action = "APPOINTMENT_ACCEPTED",
+                userId = currentProviderId.value,
+                userRole = "PROVIDER",
+                details = "Acceptation et confirmation du rendez-vous #$appointmentId."
+            )
         }
     }
 
     fun declineAppointment(appointmentId: String) {
         viewModelScope.launch {
             repository.updateAppointmentStatus(appointmentId, AppointmentStatus.DECLINED)
+            securityService.recordAudit(
+                action = "APPOINTMENT_DECLINED",
+                userId = currentProviderId.value,
+                userRole = "PROVIDER",
+                details = "Refus du rendez-vous #$appointmentId par le prestataire."
+            )
         }
     }
 
     fun completeAppointment(appointmentId: String) {
         viewModelScope.launch {
             repository.updateAppointmentStatus(appointmentId, AppointmentStatus.COMPLETED)
+            securityService.recordAudit(
+                action = "APPOINTMENT_COMPLETED",
+                userId = currentProviderId.value,
+                userRole = "PROVIDER",
+                details = "Clôture et règlement finalisé du rendez-vous #$appointmentId."
+            )
         }
     }
 
     fun cancelAppointment(appointmentId: String) {
         viewModelScope.launch {
             repository.updateAppointmentStatus(appointmentId, AppointmentStatus.CANCELLED_BY_CLIENT)
+            securityService.recordAudit(
+                action = "APPOINTMENT_CANCELLED",
+                userId = currentUser.value.id,
+                userRole = "CLIENT",
+                details = "Annulation du rendez-vous #$appointmentId par le client."
+            )
         }
     }
 

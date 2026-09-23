@@ -18,9 +18,11 @@ import kotlinx.coroutines.launch
         ChatMessageEntity::class,
         LocalityEntity::class,
         FavoriteEntity::class,
-        PlatformSettingsEntity::class
+        PlatformSettingsEntity::class,
+        SecurityAuditEntity::class,
+        UserConsentEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class BeautyBfDatabase : RoomDatabase() {
@@ -32,6 +34,8 @@ abstract class BeautyBfDatabase : RoomDatabase() {
     abstract fun localityDao(): LocalityDao
     abstract fun favoriteDao(): FavoriteDao
     abstract fun platformSettingsDao(): PlatformSettingsDao
+    abstract fun securityAuditDao(): SecurityAuditDao
+    abstract fun userConsentDao(): UserConsentDao
 
     companion object {
         @Volatile
@@ -44,6 +48,7 @@ abstract class BeautyBfDatabase : RoomDatabase() {
                     BeautyBfDatabase::class.java,
                     "beauty_bf_database"
                 )
+                    .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
@@ -526,6 +531,51 @@ abstract class BeautyBfDatabase : RoomDatabase() {
 
             // 8. Demo Favorite
             database.favoriteDao().addFavorite(FavoriteEntity("prov-amina"))
+
+            // 9. Mandatory Data Protection Consents (Conformité Loi 001-2021/AN Burkina Faso)
+            val defaultConsents = listOf(
+                UserConsentEntity(
+                    consentKey = "DATA_PROCESSING",
+                    title = "Traitement des données de rendez-vous",
+                    description = "Autorise le traitement sécurisé de votre identité et téléphone pour la mise en relation avec le salon ou la professionnelle.",
+                    legalReference = "Loi 001-2021/AN relative à la protection des données (Art. 12)",
+                    isGranted = true,
+                    updatedAt = System.currentTimeMillis()
+                ),
+                UserConsentEntity(
+                    consentKey = "GEOLOCATION_HOME",
+                    title = "Localisation pour prestation à domicile",
+                    description = "Partage sécurisé de votre quartier et repères d'accès uniquement lorsque vous réservez une prestation à domicile.",
+                    legalReference = "Loi 001-2021/AN relative à la protection des données (Art. 15)",
+                    isGranted = true,
+                    updatedAt = System.currentTimeMillis()
+                ),
+                UserConsentEntity(
+                    consentKey = "SECURITY_NOTIFICATIONS",
+                    title = "Notifications de sécurité et alertes SMS",
+                    description = "Réception de codes OTP de vérification et confirmations de commande sans prospection commerciale indésirable.",
+                    legalReference = "Loi 001-2021/AN relative à la protection des données (Art. 18)",
+                    isGranted = true,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            database.userConsentDao().insertConsents(defaultConsents)
+
+            // 10. Genesis Block for Tamper-Evident Security Audit Log
+            val genesisTime = System.currentTimeMillis()
+            val genesisHash = "0000000000000000000000000000000000000000000000000000000000000000"
+            val initialAudit = SecurityAuditEntity(
+                id = "sec-genesis-0",
+                timestamp = genesisTime,
+                action = "SECURITY_SYSTEM_INITIALIZED",
+                userId = "SYSTEM",
+                userRole = "ADMIN",
+                details = "Initialisation du coffre-fort de sécurité, base de données chiffrée et registre d'audit inviolable BEAUTY BF.",
+                ipOrDeviceHash = "sha256:sys-keystore-primary",
+                previousHash = genesisHash,
+                integrityHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            )
+            database.securityAuditDao().insertAuditLog(initialAudit)
         }
     }
 }

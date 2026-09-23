@@ -130,3 +130,26 @@ data class PlatformSettingsEntity(
     val cashPaymentActive: Boolean,
     val appNoticeMessage: String
 )
+
+@Entity(tableName = "security_audit_logs")
+data class SecurityAuditEntity(
+    @PrimaryKey val id: String,
+    val timestamp: Long,
+    val action: String,
+    val userId: String,
+    val userRole: String,
+    val details: String,
+    val ipOrDeviceHash: String,
+    val previousHash: String,
+    val integrityHash: String
+)
+
+@Entity(tableName = "user_consents")
+data class UserConsentEntity(
+    @PrimaryKey val consentKey: String,
+    val title: String,
+    val description: String,
+    val legalReference: String,
+    val isGranted: Boolean,
+    val updatedAt: Long
+)
